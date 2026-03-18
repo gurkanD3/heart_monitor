@@ -1,0 +1,10 @@
+identifier: custom_discovery/nrf52833
+name: typical_discovery
+vendor: designedbygurkan
+type: mcu
+arch: arm
+ram: 128
+flash: 512
+toolchain:
+  - zephyr
+supported: []

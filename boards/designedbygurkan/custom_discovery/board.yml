@@ -1,0 +1,5 @@
+board:
+  name: custom_discovery
+  vendor: designedbygurkan
+  socs:
+    - name: nrf52833

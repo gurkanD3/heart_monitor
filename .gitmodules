@@ -1,0 +1,3 @@
+[submodule "zephyr_circular_buffer"]
+	path = zephyr_circular_buffer
+	url = https://github.com/gurkanD3/zephyr_circular_buffer.git
