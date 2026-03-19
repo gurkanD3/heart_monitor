@@ -23,7 +23,7 @@ the same time.
 The main application configuration is in `${WORKSPACE_ROOT}/prj.conf`.
 
 ### Very important
-Please make sure that you called submodules by cloning this repo
+Please make sure that you called submodules by cloning this repo.
 ```
 git clone --recursive https://github.com/gurkanD3/heart_monitor.git
 
@@ -42,6 +42,17 @@ Important options:
 - `CONFIG_CIRCULAR_BUFFER_SIZE=30`
 - `CONFIG_USE_SEGGER_RTT=y`
 - `CONFIG_RTT_CONSOLE=y`
+
+## Build with Dockerfile
+inside of project folder: `Image size 9.8GB`
+```
+docker build -t hear_monitor_nrf .
+docker run --rm -v "$(pwd)/out:/work/Heart_monitor/out" heart-monitor-nrf
+```
+
+During run, first it will initalize unit tests of circular buffer. Then it will generate bin files 
+Inside of out folder, binaries necessary to flashing.
+
 
 ## Build With nRF Connect For VS Code
 

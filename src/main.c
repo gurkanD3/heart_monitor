@@ -4,9 +4,11 @@
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/random/random.h>
+#include <zephyr/sys/atomic.h>
 #include <zephyr/sys/util.h>
 
 #include "circular_buffer.h"
+#include "watchdog.h"
 
 LOG_MODULE_REGISTER(heart_monitor, LOG_LEVEL_INF);
 
@@ -25,6 +27,8 @@ static k_tid_t producer_tid;
 static k_tid_t consumer_tid;
 
 K_MUTEX_DEFINE(buffer_mutex);
+static atomic_t producer_wdt_check;
+static atomic_t consumer_wdt_check;
 
 struct ema_filter {
 	uint8_t alpha_percent;
@@ -60,16 +64,12 @@ static uint32_t ema_update(struct ema_filter *filter, uint8_t sample)
 
 int main(void)
 {       
-        cb_err_t ret= circular_buffer_init_();
-        /**
-         cb_err_t ret= circular_buffer_init_(20); // for linked list approach
-         */
-
+	cb_err_t ret= circular_buffer_init();
 	if (ret != CBUFFER_OK) {
 		LOG_ERR("Failed to initialize circular buffer: %d", ret);
 		return ret;
 	}
-
+	watchdog_configuration();
 	if (producer_tid == NULL) {
 		producer_tid = k_thread_create(&producer_thread, producer_stack,
 					       K_THREAD_STACK_SIZEOF(producer_stack),
@@ -88,7 +88,14 @@ int main(void)
 					       0, K_NO_WAIT);
 	}
 
-	return 0;
+	while (true) {
+		k_sleep(K_MSEC(1000));
+
+		if (atomic_cas(&producer_wdt_check, 1, 0) &&
+		    atomic_cas(&consumer_wdt_check, 1, 0)) {
+			watchdog_feed();
+		}
+	}
 }
 
 static void producer_task(void *arg1, void *arg2, void *arg3)
@@ -109,6 +116,7 @@ static void producer_task(void *arg1, void *arg2, void *arg3)
 		if (ret != CBUFFER_OK) {
 			LOG_ERR("Failed to push sample: %d", ret);
 		}
+		atomic_set(&producer_wdt_check, 1);
 
 		k_sleep(K_MSEC(PRODUCER_INTERVAL_MS));
 	}
@@ -126,7 +134,6 @@ static void consumer_task(void *arg1, void *arg2, void *arg3)
 
 	while (true) {
 		k_sleep(K_MSEC(CONSUMER_INTERVAL_MS));
-
 		k_mutex_lock(&buffer_mutex, K_FOREVER);
 		while (circular_buffer_pop(&sample) == CBUFFER_OK) {
 			ema_value = ema_update(&ema, sample);
@@ -134,6 +141,7 @@ static void consumer_task(void *arg1, void *arg2, void *arg3)
 			LOG_INF("Consumed sample: %u -> EMA: %u", sample, ema_value);
 		}
 		k_mutex_unlock(&buffer_mutex);
+		atomic_set(&consumer_wdt_check, 1);
 
 		if (consumed == 0U) {
 			LOG_INF("Consumer found no buffered samples");

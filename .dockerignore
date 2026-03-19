@@ -1,0 +1,7 @@
+.git
+.vscode
+build
+__pycache__
+*.pyc
+zephyr_circular_buffer/.git
+zephyr_circular_buffer/build
