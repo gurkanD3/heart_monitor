@@ -7,15 +7,17 @@
 #include <zephyr/sys/atomic.h>
 #include <zephyr/sys/util.h>
 
+#include "system_reset_reason.h"
 #include "circular_buffer.h"
 #include "watchdog.h"
 
 LOG_MODULE_REGISTER(heart_monitor, LOG_LEVEL_INF);
 
+#define EMA_ALPHA_MAX	256
 #define THREAD_PRIORITY 4
 #define PRODUCER_INTERVAL_MS 1000
 #define CONSUMER_INTERVAL_MS 10000
-#define EMA_ALPHA_PERCENT 25
+#define EMA_ALPHA_FACTOR (64)
 
 K_THREAD_STACK_DEFINE(producer_stack, 1024);
 K_THREAD_STACK_DEFINE(consumer_stack, 1024);
@@ -30,11 +32,13 @@ K_MUTEX_DEFINE(buffer_mutex);
 static atomic_t producer_wdt_check;
 static atomic_t consumer_wdt_check;
 
-struct ema_filter {
-	uint8_t alpha_percent;
+//EMA=alpha⋅x+(1−alpha)⋅prev
+// for easy divison I change ema range to 0-256
+struct ema_filter { 
 	uint32_t value;
-	bool initialized;
-}ema={EMA_ALPHA_PERCENT,0,false};
+	uint16_t alpha_factor; //based 256
+	uint8_t initialized:1;
+}ema={0,EMA_ALPHA_FACTOR,false};
 
 static void producer_task(void *arg1, void *arg2, void *arg3);
 static void consumer_task(void *arg1, void *arg2, void *arg3);
@@ -48,7 +52,7 @@ static uint8_t generate_random_sample(void)
 
 static uint32_t ema_update(struct ema_filter *filter, uint8_t sample)
 {
-	uint32_t alpha = filter->alpha_percent;
+	uint32_t alpha = filter->alpha_factor;
 
 	if (!filter->initialized) {
 		filter->value = sample;
@@ -56,8 +60,13 @@ static uint32_t ema_update(struct ema_filter *filter, uint8_t sample)
 		return filter->value;
 	}
 
-	filter->value =
-		((alpha * sample) + ((100U - alpha) * filter->value)) / 100U;
+		/**
+		 * calculation is alpha is a 256 based so
+		 * alpha/256 so if we write every alpha to alpha/256
+		 * now = alpha*sample/256 + (256-alpha/256)*prev
+		 * ((alpha*sample)+(256-alpha)*prev))/256
+		 */
+	filter->value = ((alpha*sample)+(EMA_ALPHA_MAX-alpha)*filter->value)>>8; // 1>>8 = 256 easy division and faster
 
 	return filter->value;
 }
@@ -69,6 +78,7 @@ int main(void)
 		LOG_ERR("Failed to initialize circular buffer: %d", ret);
 		return ret;
 	}
+	log_reset_reason();
 	watchdog_configuration();
 	if (producer_tid == NULL) {
 		producer_tid = k_thread_create(&producer_thread, producer_stack,
@@ -90,10 +100,13 @@ int main(void)
 
 	while (true) {
 		k_sleep(K_MSEC(1000));
+		bool producer_heart_beat = atomic_get(&producer_wdt_check);
+		bool consumer_heart_beat = atomic_get(&consumer_wdt_check);
 
-		if (atomic_cas(&producer_wdt_check, 1, 0) &&
-		    atomic_cas(&consumer_wdt_check, 1, 0)) {
+		if (producer_heart_beat &&consumer_heart_beat) { // make sure all tasks are updated!
 			watchdog_feed();
+			atomic_cas(&producer_wdt_check,1,0);
+			atomic_cas(&consumer_wdt_check,1,0);
 		}
 	}
 }
@@ -138,18 +151,13 @@ static void consumer_task(void *arg1, void *arg2, void *arg3)
 		while (circular_buffer_pop(&sample) == CBUFFER_OK) {
 			ema_value = ema_update(&ema, sample);
 			consumed++;
-			LOG_INF("Consumed sample: %u -> EMA: %u", sample, ema_value);
 		}
 		k_mutex_unlock(&buffer_mutex);
 		atomic_set(&consumer_wdt_check, 1);
-
 		if (consumed == 0U) {
-			LOG_INF("Consumer found no buffered samples");
 			continue;
 		}
-
-		LOG_INF("Consumer drained %u samples, latest EMA: %u",
-			(unsigned int)consumed, ema_value);
+		LOG_INF("latest EMA: %u", ema_value);
 		consumed = 0U;
 	}
 }

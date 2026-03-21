@@ -11,5 +11,5 @@ find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 
 project(Heart_monitor)
 
-target_sources(app PRIVATE src/main.c src/watchdog.c)
+target_sources(app PRIVATE src/main.c src/watchdog.c src/system_reset_reason.c)
 zephyr_library_include_directories(src/include)

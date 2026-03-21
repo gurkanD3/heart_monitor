@@ -1,4 +1,6 @@
 #include "watchdog.h"
+#include <zephyr/sys/reboot.h>
+#include <zephyr/drivers/watchdog.h>
 LOG_MODULE_REGISTER(watchdog_timer, LOG_LEVEL_INF);
 
 #ifndef WDT_OPT
@@ -15,7 +17,7 @@ LOG_MODULE_REGISTER(watchdog_timer, LOG_LEVEL_INF);
 
 
 #ifndef WDT_ALLOW_CALLBACK
-#define WDT_ALLOW_CALLBACK 1
+#define WDT_ALLOW_CALLBACK 0
 #endif
 
 static int wdt_channel_id;
@@ -27,7 +29,6 @@ static void wdt_callback(const struct device *wdt_dev, int channel_id)
 	ARG_UNUSED(wdt_dev);
 	ARG_UNUSED(channel_id);
 	sys_reboot(0);
-	LOG_ERR("Watchdog timeout callback fired");
 }
 #endif /* WDT_ALLOW_CALLBACK */
 
